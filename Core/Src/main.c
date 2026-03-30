@@ -22,6 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -32,6 +34,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define LED_TASK_DELAY_MS   500U
+#define UART_TASK_DELAY_MS  1000U
 
 /* USER CODE END PD */
 
@@ -51,6 +55,23 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
+osThreadId_t ledTaskHandle;
+osThreadId_t uartTaskHandle;
+
+const osThreadAttr_t ledTask_attributes = {
+  .name = "ledTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+
+const osThreadAttr_t uartTask_attributes = {
+  .name = "uartTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
+
+volatile uint32_t led_toggle_count = 0;
+volatile uint32_t uart_log_count = 0;
 
 /* USER CODE END PV */
 
@@ -59,13 +80,20 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
+void StartLedTask(void *argument);
+void StartUartTask(void *argument);
 
 /* USER CODE BEGIN PFP */
+static void DebugPrint(const char *message);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void DebugPrint(const char *message)
+{
+  HAL_UART_Transmit(&huart2, (uint8_t *)message, strlen(message), HAL_MAX_DELAY);
+}
 
 /* USER CODE END 0 */
 
@@ -127,7 +155,8 @@ int main(void)
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+  ledTaskHandle = osThreadNew(StartLedTask, NULL, &ledTask_attributes);
+  uartTaskHandle = osThreadNew(StartUartTask, NULL, &uartTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -290,12 +319,67 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
+  DebugPrint("\r\n[defaultTask] FreeRTOS scheduler started.\r\n");
+
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(5000);
   }
   /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StartLedTask */
+/**
+  * @brief Blink LD2 periodically to show independent RTOS task execution.
+  * @param argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartLedTask */
+void StartLedTask(void *argument)
+{
+  /* USER CODE BEGIN StartLedTask */
+  for(;;)
+  {
+    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+    led_toggle_count++;
+    osDelay(LED_TASK_DELAY_MS);
+  }
+  /* USER CODE END StartLedTask */
+}
+
+/* USER CODE BEGIN Header_StartUartTask */
+/**
+  * @brief Periodically print RTOS activity over USART2.
+  * @param argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartUartTask */
+void StartUartTask(void *argument)
+{
+  /* USER CODE BEGIN StartUartTask */
+  char tx_buf[128];
+
+  DebugPrint("[uartTask] USART2 logging started at 115200 baud.\r\n");
+
+  for(;;)
+  {
+    uart_log_count++;
+
+    int len = snprintf(tx_buf, sizeof(tx_buf),
+                       "[uartTask] tick=%lu ms, led_toggle_count=%lu, uart_log_count=%lu\r\n",
+                       (unsigned long)HAL_GetTick(),
+                       (unsigned long)led_toggle_count,
+                       (unsigned long)uart_log_count);
+
+    if (len > 0)
+    {
+      HAL_UART_Transmit(&huart2, (uint8_t *)tx_buf, (uint16_t)len, HAL_MAX_DELAY);
+    }
+
+    osDelay(UART_TASK_DELAY_MS);
+  }
+  /* USER CODE END StartUartTask */
 }
 
 /**
