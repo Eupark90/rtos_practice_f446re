@@ -34,6 +34,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/*
+ * 실습용 주기 정의
+ * - LED task는 500ms마다 LD2를 토글
+ * - UART task는 1000ms마다 현재 상태를 문자열로 출력
+ */
 #define LED_TASK_DELAY_MS   500U
 #define UART_TASK_DELAY_MS  1000U
 
@@ -55,9 +60,16 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
+/* 추가 실습 task handle */
 osThreadId_t ledTaskHandle;
 osThreadId_t uartTaskHandle;
 
+/*
+ * task 속성 정의
+ * - name: 디버깅 시 thread 이름으로 보임
+ * - stack_size: 각 task에 할당할 스택 크기(Byte 단위)
+ * - priority: 스케줄러가 task를 어떤 우선순위로 실행할지 결정
+ */
 const osThreadAttr_t ledTask_attributes = {
   .name = "ledTask",
   .stack_size = 128 * 4,
@@ -70,6 +82,11 @@ const osThreadAttr_t uartTask_attributes = {
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 
+/*
+ * 실습 관찰용 카운터
+ * - led_toggle_count: LED task가 몇 번 실행되었는지 확인
+ * - uart_log_count : UART task가 몇 번 로그를 출력했는지 확인
+ */
 volatile uint32_t led_toggle_count = 0;
 volatile uint32_t uart_log_count = 0;
 
@@ -90,6 +107,10 @@ static void DebugPrint(const char *message);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/*
+ * 간단한 UART 문자열 출력 helper.
+ * printf retarget 없이도 고정 문자열을 바로 USART2로 내보낼 수 있게 만든 함수.
+ */
 static void DebugPrint(const char *message)
 {
   HAL_UART_Transmit(&huart2, (uint8_t *)message, strlen(message), HAL_MAX_DELAY);
@@ -131,7 +152,11 @@ int main(void)
 
   /* USER CODE END 2 */
 
-  /* Init scheduler */
+  /*
+   * FreeRTOS 커널 초기화.
+   * 이 시점부터 mutex / semaphore / queue / thread 같은 RTOS 객체를 만들 수 있다.
+   * 아직 스케줄러는 시작되지 않았으므로 task가 실행되지는 않는다.
+   */
   osKernelInitialize();
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -155,6 +180,11 @@ int main(void)
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
+  /*
+   * 실습용 task 2개 생성
+   * - ledTask : 주기적으로 LD2 LED 토글
+   * - uartTask: 주기적으로 시스템 상태를 UART로 출력
+   */
   ledTaskHandle = osThreadNew(StartLedTask, NULL, &ledTask_attributes);
   uartTaskHandle = osThreadNew(StartUartTask, NULL, &uartTask_attributes);
   /* USER CODE END RTOS_THREADS */
@@ -163,7 +193,11 @@ int main(void)
   /* add events, ... */
   /* USER CODE END RTOS_EVENTS */
 
-  /* Start scheduler */
+  /*
+   * 스케줄러 시작.
+   * 여기서부터는 준비된 task들이 우선순위와 delay 조건에 따라 번갈아 실행된다.
+   * 정상 동작 시 main의 while(1)로 다시 돌아오지 않는다.
+   */
   osKernelStart();
 
   /* We should never get here as control is now taken by the scheduler */
@@ -319,11 +353,19 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
+  /*
+   * defaultTask는 CubeMX가 기본으로 만들어주는 task.
+   * 이번 실습에서는 "스케줄러 시작 확인용" 정도의 최소 역할만 맡긴다.
+   */
   DebugPrint("\r\n[defaultTask] FreeRTOS scheduler started.\r\n");
 
   /* Infinite loop */
   for(;;)
   {
+    /*
+     * 의미 없는 바쁜 루프를 돌지 않도록 충분히 sleep.
+     * osDelay() 동안은 CPU를 점유하지 않고 다른 task가 실행될 수 있다.
+     */
     osDelay(5000);
   }
   /* USER CODE END 5 */
@@ -341,8 +383,13 @@ void StartLedTask(void *argument)
   /* USER CODE BEGIN StartLedTask */
   for(;;)
   {
+    /* 보드 내장 LED(LD2)를 반전시켜 점멸 효과를 만든다. */
     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+    /* task가 몇 번 주기 실행되었는지 관찰하기 위한 카운터 */
     led_toggle_count++;
+
+    /* 지정한 시간만큼 block 상태로 들어가고, 그동안 다른 task가 실행된다. */
     osDelay(LED_TASK_DELAY_MS);
   }
   /* USER CODE END StartLedTask */
@@ -360,12 +407,19 @@ void StartUartTask(void *argument)
   /* USER CODE BEGIN StartUartTask */
   char tx_buf[128];
 
+  /* UART 로그 task 시작 메시지 */
   DebugPrint("[uartTask] USART2 logging started at 115200 baud.\r\n");
 
   for(;;)
   {
+    /* UART task 실행 횟수 누적 */
     uart_log_count++;
 
+    /*
+     * HAL_GetTick(): 시스템 tick 기반 시간(ms)
+     * led_toggle_count: LED task가 실제로 얼마나 돌았는지 확인 가능
+     * uart_log_count : UART task의 주기 실행 여부 확인 가능
+     */
     int len = snprintf(tx_buf, sizeof(tx_buf),
                        "[uartTask] tick=%lu ms, led_toggle_count=%lu, uart_log_count=%lu\r\n",
                        (unsigned long)HAL_GetTick(),
@@ -374,9 +428,11 @@ void StartUartTask(void *argument)
 
     if (len > 0)
     {
+      /* 생성된 문자열을 USART2로 그대로 전송 */
       HAL_UART_Transmit(&huart2, (uint8_t *)tx_buf, (uint16_t)len, HAL_MAX_DELAY);
     }
 
+    /* 1초 주기로 상태 로그 출력 */
     osDelay(UART_TASK_DELAY_MS);
   }
   /* USER CODE END StartUartTask */
